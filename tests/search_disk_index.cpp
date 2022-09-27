@@ -162,7 +162,7 @@ int search_disk_index(
 
 #pragma omp parallel for schedule(dynamic, 1)
     for (_s64 i = 0; i < (int64_t) warmup_num; i++) {
-      _pFlashIndex->cached_beam_search(warmup + (i * warmup_aligned_dim), 1,
+      _pFlashIndex->page_search(warmup + (i * warmup_aligned_dim), 1,
                                        warmup_L,
                                        warmup_result_ids_64.data() + (i * 1),
                                        warmup_result_dists.data() + (i * 1), 4);
@@ -219,7 +219,7 @@ int search_disk_index(
 
 #pragma omp parallel for schedule(dynamic, 1)
     for (_s64 i = 0; i < (int64_t) query_num; i++) {
-      _pFlashIndex->cached_beam_search(
+      _pFlashIndex->page_search(
           query + (i * query_aligned_dim), recall_at, L,
           query_result_ids_64.data() + (i * recall_at),
           query_result_dists[test_id].data() + (i * recall_at),

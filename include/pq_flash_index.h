@@ -108,6 +108,11 @@ namespace diskann {
         float *res_dists, const _u64 beam_width, const _u32 io_limit,
         const bool use_reorder_data = false, QueryStats *stats = nullptr);
 
+    DISKANN_DLLEXPORT void page_search(
+        const T *query, const _u64 k_search, const _u64 l_search, _u64 *res_ids,
+        float *res_dists, const _u64 beam_width, const _u32 io_limit,
+        const bool use_reorder_data = false, QueryStats *stats = nullptr);
+
     DISKANN_DLLEXPORT _u32 range_search(const T *query1, const double range,
                                         const _u64          min_l_search,
                                         const _u64          max_l_search,
@@ -205,6 +210,16 @@ namespace diskann {
     _u32 mem_topk_ = 0;
     std::unique_ptr<Index<T, uint32_t>> mem_index_;
     std::vector<unsigned> memid2diskid_;
+
+    // page search
+    std::vector<unsigned> id2page_;
+    std::vector<std::vector<unsigned>> gp_layout_;
+    // tsl::robin_map<_u32, char*> page_cache_;
+    // tsl::robin_map<_u32, char*> node_cache_;
+
+    // load id to page id and graph partition layout
+    void load_partition_data(const std::string &index_prefix,
+        const _u64 nnodes_per_sector, const _u64 num_points);
 
 #ifdef EXEC_ENV_OLS
     // Set to a larger value than the actual header to accommodate

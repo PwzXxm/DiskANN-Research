@@ -107,14 +107,17 @@ case $2 in
       OLD_INDEX_FILE=${INDEX_PREFIX_PATH}_disk.index
     fi
     GP_FILE_PATH=${GP_PATH}_part.bin
+    echo "Running graph partition... ${GP_FILE_PATH}.log"
     time ../graph_partition/SSD_Based_Plan $DATA_DIM $DATA_N ${OLD_INDEX_FILE} \
       $DATA_TYPE $GP_FILE_PATH $GP_T $GP_TIMES $GP_DESCEND_TIMES 0 > ${GP_FILE_PATH}.log
     
+    echo "Running relayout... ${GP_PATH}relayout.log"
     time ./utils/index_relayout ${OLD_INDEX_FILE} ${GP_FILE_PATH} > ${GP_PATH}relayout.log
     if [ ! -f "${INDEX_PREFIX_PATH}_disk_old.index" ]; then
       mv $OLD_INDEX_FILE ${INDEX_PREFIX_PATH}_disk_old.index
     fi
     cp ${GP_PATH}_part_tmp.index ${INDEX_PREFIX_PATH}_disk.index
+    cp ${GP_FILE_PATH} ${INDEX_PREFIX_PATH}_partition.bin
   ;;
   search)
     if [ ! -d "$INDEX_PREFIX_PATH" ]; then
