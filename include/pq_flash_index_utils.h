@@ -35,16 +35,16 @@
 #define VECTOR_SECTOR_OFFSET(id) \
   ((((_u64)(id)) % nvecs_per_sector) * data_dim * sizeof(float))
 
-namespace diskann{
+namespace diskann {
   namespace pq_flash_index_utils {
-    void aggregate_coords(const unsigned *ids, const _u64 n_ids,
+    inline void aggregate_coords(const unsigned *ids, const _u64 n_ids,
                           const _u8 *all_coords, const _u64 ndims, _u8 *out) {
       for (_u64 i = 0; i < n_ids; i++) {
         memcpy(out + i * ndims, all_coords + ids[i] * ndims, ndims * sizeof(_u8));
       }
     }
 
-    void pq_dist_lookup(const _u8 *pq_ids, const _u64 n_pts,
+    inline void pq_dist_lookup(const _u8 *pq_ids, const _u64 n_pts,
                         const _u64 pq_nchunks, const float *pq_dists,
                         float *dists_out) {
       _mm_prefetch((char *) dists_out, _MM_HINT_T0);

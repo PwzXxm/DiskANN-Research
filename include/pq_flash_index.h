@@ -18,6 +18,7 @@
 #include "utils.h"
 #include "windows_customizations.h"
 #include "index.h"
+#include "pq_flash_index_utils.h"
 
 #define MAX_GRAPH_DEGREE 512
 #define MAX_N_CMPS 16384
@@ -47,11 +48,13 @@ namespace diskann {
     float *aligned_query_float = nullptr;
 
     tsl::robin_set<_u64> *visited = nullptr;
+    tsl::robin_set<unsigned> *page_visited = nullptr;
 
     void reset() {
       coord_idx = 0;
       sector_idx = 0;
       visited->clear();  // does not deallocate memory.
+      page_visited->clear();
     }
   };
 
@@ -66,8 +69,13 @@ namespace diskann {
    public:
     DISKANN_DLLEXPORT PQFlashIndex(
         std::shared_ptr<AlignedFileReader> &fileReader,
-        diskann::Metric                     metric = diskann::Metric::L2);
+        diskann::Metric                     metric = diskann::Metric::L2,
+        const bool use_page_search = true);
     DISKANN_DLLEXPORT ~PQFlashIndex();
+
+    // load id to page id and graph partition layout
+    DISKANN_DLLEXPORT void load_partition_data(const std::string &index_prefix,
+        const _u64 nnodes_per_sector = 0, const _u64 num_points = 0);
 
 #ifdef EXEC_ENV_OLS
     DISKANN_DLLEXPORT int load(diskann::MemoryMappedFiles &files,
@@ -212,14 +220,11 @@ namespace diskann {
     std::vector<unsigned> memid2diskid_;
 
     // page search
+    bool use_page_search_ = true;
     std::vector<unsigned> id2page_;
     std::vector<std::vector<unsigned>> gp_layout_;
     // tsl::robin_map<_u32, char*> page_cache_;
     // tsl::robin_map<_u32, char*> node_cache_;
-
-    // load id to page id and graph partition layout
-    void load_partition_data(const std::string &index_prefix,
-        const _u64 nnodes_per_sector, const _u64 num_points);
 
 #ifdef EXEC_ENV_OLS
     // Set to a larger value than the actual header to accommodate

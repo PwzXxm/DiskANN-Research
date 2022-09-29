@@ -1,9 +1,10 @@
-#include <fstream>
-
 #include "logger.h"
 #include "percentile_stats.h"
 #include "pq_flash_index.h"
-#include "pq_flash_index_utils.h"
+#include "timer.h"
+
+namespace {
+} // namespace anonymous
 
 namespace diskann {
   template<typename T>
@@ -15,7 +16,8 @@ namespace diskann {
     part.read((char *) &C, sizeof(_u64));
     part.read((char *) &partition_nums, sizeof(_u64));
     part.read((char *) &nd, sizeof(_u64));
-    if (C != nnodes_per_sector || nd != num_points) {
+    if (nnodes_per_sector && num_points &&
+        (C != nnodes_per_sector || nd != num_points)) {
       diskann::cerr << "partition information not correct." << std::endl;
       exit(-1);
     }
@@ -107,6 +109,7 @@ namespace diskann {
     Timer                 query_timer, io_timer, cpu_timer;
     std::vector<Neighbor> retset(l_search + 1);
     tsl::robin_set<_u64> &visited = *(query_scratch->visited);
+    tsl::robin_set<unsigned> &page_visited = *(query_scratch->page_visited);
 
     std::vector<Neighbor> full_retset;
     full_retset.reserve(4096);
@@ -160,6 +163,10 @@ namespace diskann {
         cached_nhoods;
     cached_nhoods.reserve(2 * beam_width);
 
+    std::vector<unsigned> last_io_id;
+    last_io_id.reserve(2 * beam_width);
+    std::vector<char> last_pages(SECTOR_LEN * beam_width * 2);
+
     while (k < cur_list_size && num_ios < io_limit) {
       auto nk = cur_list_size;
       // clear iteration state
@@ -171,10 +178,14 @@ namespace diskann {
       // find new beam
       _u32 marker = k;
       _u32 num_seen = 0;
+
+      // distribute cache and disk-read nodes
       while (marker < cur_list_size && frontier.size() < beam_width &&
              num_seen < beam_width) {
-        if (retset[marker].flag) {
+        unsigned pid = retset[marker].id;
+        if (page_visited.find(pid) == page_visited.end() && retset[marker].flag) {
           num_seen++;
+          // TODO: add different cache strategies
           auto iter = nhood_cache.find(retset[marker].id);
           if (iter != nhood_cache.end()) {
             cached_nhoods.push_back(
@@ -184,6 +195,7 @@ namespace diskann {
             }
           } else {
             frontier.push_back(retset[marker].id);
+            page_visited.insert(pid);
           }
           retset[marker].flag = false;
           if (this->count_visited_nodes) {
@@ -216,7 +228,9 @@ namespace diskann {
           num_ios++;
         }
         io_timer.reset();
+
         reader->read(frontier_read_reqs, ctx);
+
         if (stats != nullptr) {
           stats->io_us += (double) io_timer.elapsed();
         }
@@ -431,4 +445,8 @@ namespace diskann {
       stats->total_us = (double) query_timer.elapsed();
     }
   }
+  template class PQFlashIndex<_u8>;
+  template class PQFlashIndex<_s8>;
+  template class PQFlashIndex<float>;
+
 } // namespace diskann

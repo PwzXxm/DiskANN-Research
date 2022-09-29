@@ -59,6 +59,7 @@ int search_disk_index(
     const unsigned beamwidth, const unsigned num_nodes_to_cache,
     const _u32 search_io_limit, const std::vector<unsigned>& Lvec,
     const _u32 mem_topk, const _u32 mem_L,
+    const bool use_page_search,
     const bool use_reorder_data = false) {
   diskann::cout << "Search parameters: #threads: " << num_threads << ", ";
   if (beamwidth <= 0)
@@ -104,7 +105,7 @@ int search_disk_index(
 #endif
 
   std::unique_ptr<diskann::PQFlashIndex<T>> _pFlashIndex(
-      new diskann::PQFlashIndex<T>(reader, metric));
+      new diskann::PQFlashIndex<T>(reader, metric, use_page_search));
 
   int res = _pFlashIndex->load(num_threads, index_path_prefix.c_str());
 
@@ -162,7 +163,7 @@ int search_disk_index(
 
 #pragma omp parallel for schedule(dynamic, 1)
     for (_s64 i = 0; i < (int64_t) warmup_num; i++) {
-      _pFlashIndex->page_search(warmup + (i * warmup_aligned_dim), 1,
+      _pFlashIndex->cached_beam_search(warmup + (i * warmup_aligned_dim), 1,
                                        warmup_L,
                                        warmup_result_ids_64.data() + (i * 1),
                                        warmup_result_dists.data() + (i * 1), 4);
@@ -217,13 +218,26 @@ int search_disk_index(
     std::vector<uint64_t> query_result_ids_64(recall_at * query_num);
     auto                  s = std::chrono::high_resolution_clock::now();
 
+    // Using branching outside the for loop instead of inside and 
+    // std::function/std::mem_fn for less switching and function calling overhead
+    if (use_page_search) {
 #pragma omp parallel for schedule(dynamic, 1)
-    for (_s64 i = 0; i < (int64_t) query_num; i++) {
-      _pFlashIndex->page_search(
-          query + (i * query_aligned_dim), recall_at, L,
-          query_result_ids_64.data() + (i * recall_at),
-          query_result_dists[test_id].data() + (i * recall_at),
-          optimized_beamwidth, search_io_limit, use_reorder_data, stats + i);
+      for (_s64 i = 0; i < (int64_t) query_num; i++) {
+        _pFlashIndex->page_search(
+            query + (i * query_aligned_dim), recall_at, L,
+            query_result_ids_64.data() + (i * recall_at),
+            query_result_dists[test_id].data() + (i * recall_at),
+            optimized_beamwidth, search_io_limit, use_reorder_data, stats + i);
+      }
+    } else {
+#pragma omp parallel for schedule(dynamic, 1)
+      for (_s64 i = 0; i < (int64_t) query_num; i++) {
+        _pFlashIndex->cached_beam_search(
+            query + (i * query_aligned_dim), recall_at, L,
+            query_result_ids_64.data() + (i * recall_at),
+            query_result_dists[test_id].data() + (i * recall_at),
+            optimized_beamwidth, search_io_limit, use_reorder_data, stats + i);
+      }
     }
     auto                          e = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff = e - s;
@@ -298,6 +312,7 @@ int main(int argc, char** argv) {
   unsigned              mem_topk, mem_L;
   std::vector<unsigned> Lvec;
   bool                  use_reorder_data = false;
+  bool                  use_page_search = true;
 
   po::options_description desc{"Arguments"};
   try {
@@ -348,6 +363,8 @@ int main(int argc, char** argv) {
                        "The L of the in-memory navigation graph while searching. Use 0 to disable");
     desc.add_options()("mem_topk", po::value<unsigned>(&mem_topk)->default_value(0),
                        "The TopK of the in-memory navigation graph.");
+    desc.add_options()("use_page_search", po::bool_switch()->default_value(true),
+                       "Use true for page search, false for DiskANN beam search");
 
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -358,6 +375,8 @@ int main(int argc, char** argv) {
     po::notify(vm);
     if (vm["use_reorder_data"].as<bool>())
       use_reorder_data = true;
+
+    use_page_search = vm["use_page_search"].as<bool>();
   } catch (const std::exception& ex) {
     std::cerr << ex.what() << '\n';
     return -1;
@@ -400,17 +419,17 @@ int main(int argc, char** argv) {
       return search_disk_index<float>(metric, index_path_prefix,
                                       result_path_prefix, query_file, gt_file,
                                       num_threads, K, W, num_nodes_to_cache,
-                                      search_io_limit, Lvec, mem_topk, mem_L, use_reorder_data);
+                                      search_io_limit, Lvec, mem_topk, mem_L, use_page_search, use_reorder_data);
     else if (data_type == std::string("int8"))
       return search_disk_index<int8_t>(metric, index_path_prefix,
                                        result_path_prefix, query_file, gt_file,
                                        num_threads, K, W, num_nodes_to_cache,
-                                       search_io_limit, Lvec, mem_topk, mem_L, use_reorder_data);
+                                       search_io_limit, Lvec, mem_topk, mem_L, use_page_search, use_reorder_data);
     else if (data_type == std::string("uint8"))
       return search_disk_index<uint8_t>(
           metric, index_path_prefix, result_path_prefix, query_file, gt_file,
           num_threads, K, W, num_nodes_to_cache, search_io_limit, Lvec, mem_topk, mem_L,
-          use_reorder_data);
+          use_page_search, use_reorder_data);
     else {
       std::cerr << "Unsupported data type. Use float or int8 or uint8"
                 << std::endl;

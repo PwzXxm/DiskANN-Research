@@ -20,12 +20,12 @@
 
 #include "cosine_similarity.h"
 #include "tsl/robin_set.h"
-#include "pq_flash_index_utils.h"
 
 namespace diskann {
   template<typename T>
   PQFlashIndex<T>::PQFlashIndex(std::shared_ptr<AlignedFileReader> &fileReader,
-                                diskann::Metric                     m)
+                                diskann::Metric                     m,
+                                const bool use_page_search)
       : reader(fileReader), metric(m) {
     if (m == diskann::Metric::COSINE || m == diskann::Metric::INNER_PRODUCT) {
       if (std::is_floating_point<T>::value) {
@@ -43,6 +43,7 @@ namespace diskann {
 
     this->dist_cmp.reset(diskann::get_distance_function<T>(m));
     this->dist_cmp_float.reset(diskann::get_distance_function<float>(m));
+    this->use_page_search_ = use_page_search;
   }
 
   template<typename T>
@@ -98,6 +99,7 @@ namespace diskann {
                                this->aligned_dim * sizeof(float),
                                8 * sizeof(float));
         scratch.visited = new tsl::robin_set<_u64>(4096);
+        scratch.page_visited = new tsl::robin_set<unsigned>(4096);
 
         memset(scratch.coord_scratch, 0, coord_alloc_size);
         memset(scratch.aligned_query_T, 0, this->aligned_dim * sizeof(T));
@@ -133,6 +135,7 @@ namespace diskann {
       diskann::aligned_free((void *) scratch.aligned_query_T);
 
       delete scratch.visited;
+      if (this->use_page_search_) delete scratch.page_visited;
     }
     this->reader->deregister_all_threads();
   }
@@ -678,7 +681,9 @@ namespace diskann {
     index_metadata.close();
 #endif
 
-    load_partition_data(index_prefix, nnodes_per_sector, num_points);
+  if (use_page_search_) {
+    this->load_partition_data(index_prefix, nnodes_per_sector, num_points);
+  }
 
 #ifndef EXEC_ENV_OLS
     // open AlignedFileReader handle to index_file
